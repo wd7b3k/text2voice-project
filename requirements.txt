@@ -22,6 +22,8 @@ cryptography==42.0.5
 # TTS — раскомментируйте нужный движок
 
 # Вариант 1: CoquiTTS (локально, лучше качество)
+torch==2.3.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
+torchaudio==2.3.0+cpu --extra-index-url https://download.pytorch.org/whl/cpu
 TTS==0.22.0
 
 # Вариант 2: ElevenLabs API
@@ -30,3 +32,4 @@ TTS==0.22.0
 # Утилиты
 python-dotenv==1.0.1
 aiofiles==23.2.1
+transformers==4.39.3

@@ -1,0 +1,111 @@
+services:
+
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python -m bot.main
+    env_file: .env
+    volumes:
+      - .:/app
+      - temp_data:/app/temp
+      - output_data:/app/output
+      - logs_data:/app/logs
+      - tts_models:/root/.local/share/tts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-2}
+    env_file: .env
+    volumes:
+      - .:/app
+      - temp_data:/app/temp
+      - output_data:/app/output
+      - logs_data:/app/logs
+      - tts_models:/root/.local/share/tts
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.tasks.celery_app beat --loglevel=info
+    env_file: .env
+    volumes:
+      - .:/app
+      - logs_data:/app/logs
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A workers.tasks.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-changeme}
+    env_file: .env
+    volumes:
+      - .:/app
+    ports:
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB:       ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  redis_data:
+  temp_data:
+  output_data:
+  tts_models:
+  logs_data:

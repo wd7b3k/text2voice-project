@@ -1,11 +1,12 @@
 services:
-
   bot:
     build:
       context: .
       dockerfile: Dockerfile
     command: python -m bot.main
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - temp_data:/app/temp
@@ -28,8 +29,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: celery -A workers.tasks.celery_app worker --loglevel=info --concurrency=${CELERY_CONCURRENCY:-2}
+    command: >
+      sh -c "
+        ffmpeg -f lavfi -i 'sine=frequency=220:duration=3' -ar 22050 -ac 1 /tmp/speaker.wav -y &&
+        celery -A workers.tasks.celery_app worker --loglevel=info --concurrency=1
+      "
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - temp_data:/app/temp
@@ -54,6 +61,8 @@ services:
       dockerfile: Dockerfile
     command: celery -A workers.tasks.celery_app beat --loglevel=info
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - logs_data:/app/logs
@@ -67,6 +76,8 @@ services:
       dockerfile: Dockerfile
     command: celery -A workers.tasks.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-changeme}
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     volumes:
       - .:/app
     ports:

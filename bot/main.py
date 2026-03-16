@@ -487,7 +487,9 @@ async def main():
 
     await init_db()
 
-    bot     = Bot(token=os.getenv("BOT_TOKEN"), parse_mode=ParseMode.HTML)
+    from aiogram.client.default import DefaultBotProperties
+    bot     = Bot(token=os.getenv("BOT_TOKEN"), default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+
     storage = RedisStorage.from_url(os.getenv("REDIS_URL"))
     dp      = Dispatcher(storage=storage)
 

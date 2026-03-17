@@ -34,10 +34,25 @@ logger = logging.getLogger(__name__)
 TEMP_DIR    = Path(os.getenv("TEMP_DIR", "/app/temp"))
 MAX_FILE_MB = int(os.getenv("MAX_FILE_SIZE_MB", 50))
 ADMIN_IDS   = {int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()}
+PROGRESS_NOTIFY_EVERY_SEC = int(os.getenv("PROGRESS_NOTIFY_EVERY_SEC", "20"))
 
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 router = Router()
+_progress_throttle: dict[int, datetime] = {}
+
+
+def _format_eta(eta_seconds: int | None) -> str:
+    if eta_seconds is None:
+        return "~ неизвестно"
+    total = max(0, int(eta_seconds))
+    minutes, seconds = divmod(total, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"~ {hours} ч {minutes} мин"
+    if minutes:
+        return f"~ {minutes} мин {seconds} сек"
+    return f"~ {seconds} сек"
 
 
 def setup_file_logging():
@@ -402,6 +417,8 @@ async def handle_document(message: Message, bot: Bot):
         await status_msg.edit_text(
             f"✅ <b>Принято в обработку!</b>\n\n"
             f"📄 {doc.file_name}\n"
+            f"⏱ Оценка времени: <b>{_format_eta(_estimate_initial_eta(doc.file_size or 0))}</b>\n"
+            f"🔄 Буду присылать этапы обработки.\n"
             f"⏳ Конвертирую по главам — пришлю когда готово.\n\n"
             f"Статус: /status",
             parse_mode=ParseMode.HTML,
@@ -468,6 +485,30 @@ async def redis_listener(bot: Bot):
                     finally:
                         Path(dec_path).unlink(missing_ok=True)
 
+            elif data["event"] == "progress":
+                conv_id = int(data.get("conversion_id", 0))
+                now = datetime.utcnow()
+                prev = _progress_throttle.get(conv_id)
+                stage = data.get("stage", "")
+
+                if prev and stage not in {"queued", "chapters", "finalize", "chapter_done"}:
+                    if (now - prev).total_seconds() < PROGRESS_NOTIFY_EVERY_SEC:
+                        continue
+
+                _progress_throttle[conv_id] = now
+
+                eta_text = _format_eta(data.get("eta_seconds"))
+                progress_value = data.get("progress")
+                progress_text = f"{progress_value}%" if progress_value is not None else "—"
+                await bot.send_message(
+                    user_id,
+                    "🔄 <b>Конвертация в процессе</b>\n"
+                    f"{data.get('message', 'Обработка продолжается…')}\n"
+                    f"Прогресс: <b>{progress_text}</b>\n"
+                    f"Осталось: <b>{eta_text}</b>",
+                    parse_mode=ParseMode.HTML,
+                )
+
             elif data["event"] == "error":
                 await bot.send_message(
                     user_id,
@@ -478,6 +519,14 @@ async def redis_listener(bot: Bot):
                 )
         except Exception as e:
             logger.error(f"Redis listener error: {e}", exc_info=True)
+
+
+def _estimate_initial_eta(file_size_bytes: int) -> int:
+    # Грубая оценка до анализа текста: базовое время + время пропорционально размеру.
+    base = int(os.getenv("INITIAL_ETA_BASE_SECONDS", "420"))
+    per_mb = int(os.getenv("INITIAL_ETA_PER_MB_SECONDS", "55"))
+    size_mb = max(1, round(file_size_bytes / (1024 * 1024)))
+    return base + size_mb * per_mb
 
 
 # ── Запуск ────────────────────────────────────────────────────────────────
